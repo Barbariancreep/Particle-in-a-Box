@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<style>
+canvas {
+    background-color: #ffffff;
+}
+</style>
+</head>
+<body onload="start_sim()">
+
+<h1 style="text-align:center" id="k">k = </h1>
+<h1 style="text-align:center" id="wall_width">Wall Width: </h1>
+
+<div style="text-align:center">
+    <hr><br>
+    <input type="range" id="wavelength_slider" min="50" max="1000">
+    <h2>Wavelength: <span id="demo"></span>px</h2>
+</div>
+
+<hr>
+<p style="text-align:center"><img src="https://i.ibb.co/Qjq38sx/phys.jpg"></p>
+
+<script>
+
+// changable variables
+var sim_width = window.innerWidth-16; //width of the canvas
+var sim_height = 200; //height of the canvas excluding an additional height of a square and the sliders
+var square_size = 6;
+var slider_width = 12;
+var slider_height = 40;
+var wave_wall_wave_ratio = [1,1,1]; //ratio of the intial wave vs the wall/barrier vs the resulting wave
+var number_of_squares = 3000;
+var wave_thickness = 10; // dimensions of square
+var wavelength; //wavelength of the initial/resultant wave
+var max_amplitude = 100;
+var amplitude_increment = 0.01;
+var speed_mult = 20;
+
+var k_max = 0.05;
+var k_min = 0;
+var k_increment = 0.0005;
+
+var k_states = (k_max-k_min)/k_increment
+var k_precision = Math.floor(Math.log10(k_increment)); //to what order of magnitude should k be precise to
+
+// variables
+var i;
+var mouse_down_bool = false;
+var amplitude = -max_amplitude;
+var resultant_amplitude; // the amplitude of the resultant wave
+var sim_background;
+var squares = [];
+var slider1;
+var slider2;
+var k_slider;
+var k_slider_background;
+var zero_line;
+var init_wave_squares; // number of squares in the initial wave
+var wall_size_squares; // number of squares in the decay function
+var result_wave_squares; // number of squares in the resultant wave
+var square_pixel_ratio = number_of_squares/sim_width; //ratio of how many squares there are compared to the width of the simulation
+var max_amplitude_pixels = sim_height/2; //the maximum amplitude of the initial wave in pixels
+var function_visual_modifier = max_amplitude_pixels / max_amplitude; //what the function has to be multiplied by to fit the 
+sim_height = sim_height + square_size;
+
+// equation-related variables/constants
+var e = 2.71828; //natural number
+var k = "?"; //decay constant
+
+// wavelength slider
+var wavelength_slider = document.getElementById("wavelength_slider");
+var output = document.getElementById("demo"); 
+output.innerHTML = wavelength_slider.value; 
+wavelength_slider.oninput = function() {
+    output.innerHTML = this.value;
+    wavelength = this.value;
+}
+
+function start_sim() {
+    canvas_space.start();
+    // static, background colours
+    sim_background = new component(sim_width, sim_height, "#ffef5e", 0, 0);
+    k_slider_background = new component(sim_width, slider_height, "#e5e4e0", 0, sim_height + slider_height);
+
+    // sliders
+    slider1 = new component(slider_width, sim_height, "orange", sim_width/3 - slider_width/2, 0);
+    slider2 = new component(slider_width, sim_height, "orange", sim_width*2/3 - slider_width/2, 0);
+    k_slider = new component(slider_width, slider_height, "#484f57", sim_width/2 - slider_width/2, sim_height + slider_height);
+
+    // generating the sqaures
+    for (i = 0; i < number_of_squares; i++) {
+        squares[i] = new component(square_size, square_size, "green", i*(canvas_space.canvas.width/number_of_squares), 0);
+    }
+
+    zero_line = new component(sim_width, 1, "black", 0, sim_height/2); // the line in the middle that defines 0
+}
+
+// define/create a canvas
+var canvas_space = {
+    canvas: document.createElement("canvas"),
+    start: function() {
+        this.canvas.width = sim_width;
+        this.canvas.height = sim_height + 2*slider_height; // the +40 is just to space the k_slider and the simulation
+        this.context = this.canvas.getContext("2d");
+        document.body.insertBefore(this.canvas, document.body.childNodes[0]);
+        this.interval = setInterval(update_canvas_space, 1);
+    }, 
+    clear: function(){
+        this.context.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    }
+}
+
+// function for creating a component on the canvas space
+function component(width, height, colour, x, y) {
+    this.gamearea = canvas_space;
+    this.width = width;
+    this.height = height;
+    this.x = x;
+    this.y = y;    
+    this.update = function() {
+        ctx = canvas_space.context;
+        ctx.fillStyle = colour;
+        ctx.fillRect(this.x, this.y, this.width, this.height);
+    }
+}
+
+// functions for mouse being pressed
+function mouse_down(event) {
+    mouse_down_bool = true;
+    if (event.clientY <= sim_height) {
+        if (Math.abs(event.clientX - slider_width - slider1.x) < Math.abs(event.clientX - slider_width - slider2.x)) {
+            slider1.x = event.clientX - slider_width;
+        } else {
+            slider2.x = event.clientX - slider_width;
+        }
+    } else if (event.clientY >= sim_height + slider_height && event.clientY <= sim_height + 2*slider_height) {
+        k_slider.x = Math.round((event.clientX - slider_width) / (sim_width/k_states)) * (sim_width/k_states); // making k_slider increment in chunks of (sim_width/k_states) pixels
+        k = k_slider.x / (sim_width/k_states) * k_increment - k_min; // k = how many increments beyond the minimum
+    } else {
+        mouse_down_bool = false;
+    }
+}
+function mouse_up(event) {
+    mouse_down_bool = false;
+}
+function mouse_move(event) { // we're saying the proper position of the mouse is (event.clientX - slider_width), since it looks more centered with the slider
+    if (mouse_down_bool) {
+        if (event.clientY <= sim_height) {
+            if (Math.abs(event.clientX - slider_width - slider1.x) < Math.abs(event.clientX - slider_width - slider2.x)) {
+                slider1.x = event.clientX - slider_width;
+            } else {
+                slider2.x = event.clientX - slider_width;
+            }
+        } else if (event.clientY >= sim_height + slider_height && event.clientY <= sim_height + 2*slider_height) {
+            k_slider.x = Math.round((event.clientX - slider_width) / (sim_width/k_states)) * (sim_width/k_states); // making k_slider increment in chunks of (sim_width/k_states) pixels
+            k = k_slider.x / (sim_width/k_states) * k_increment - k_min; // k = how many increments beyond the minimum
+        } else {
+            mouse_down_bool = false;
+        }
+    }
+}
+//assign events
+canvas_space.canvas.addEventListener("mousedown", mouse_down);
+canvas_space.canvas.addEventListener("mouseup", mouse_up);
+canvas_space.canvas.addEventListener("mouseout", mouse_up); // when mouse leaves window
+canvas_space.canvas.addEventListener("mousemove", mouse_move);
+
+function update_canvas_space() {
+    canvas_space.clear();
+    sim_background.update();
+    k_slider_background.update();
+
+    slider1.update();
+    slider2.update();
+    k_slider.update();
+
+    document.getElementById("k").innerHTML = "k = " + String(k).substring(0, Math.abs(k_precision)+2); // to many "k"s hahahah
+    document.getElementById("wall_width").innerHTML = "Wall width: " + String(Math.round(slider2.x-slider1.x)) + "px"; 
+
+    init_wave_squares = Math.round(slider1.x * square_pixel_ratio);
+    wall_size_squares = Math.round(slider2.x * square_pixel_ratio) - init_wave_squares;
+    result_wave_squares = number_of_squares - init_wave_squares - wall_size_squares;
+
+    // all the waves/functions have their X divided by square_pixel_ratio to maintain the correct size even if the number of squares does not match the width of the simulation
+    // draw intial wave
+    for (i = 0; i < init_wave_squares; i++) {
+        squares[i].y = amplitude*Math.cos((i-init_wave_squares)/square_pixel_ratio / wavelength * 2*Math.PI)*function_visual_modifier + max_amplitude_pixels;
+        squares[i].update();
+    }
+    // draw decay function
+    for (i = 0; i < wall_size_squares; i++) {
+        squares[i + init_wave_squares].y = amplitude*Math.pow(e, -k*i/square_pixel_ratio/function_visual_modifier)*function_visual_modifier + max_amplitude_pixels;
+        squares[i + init_wave_squares].update();
+    }
+    resultant_amplitude = amplitude*Math.pow(e, -k*wall_size_squares/square_pixel_ratio/function_visual_modifier);
+
+    // draw resultant wave
+    for (i = 0; i < result_wave_squares; i++) {
+        squares[i + init_wave_squares+wall_size_squares].y = resultant_amplitude*Math.cos(i/square_pixel_ratio / wavelength * 2*Math.PI)*function_visual_modifier + max_amplitude_pixels;
+        squares[i + init_wave_squares+wall_size_squares].update();
+    }
+    if (amplitude >= max_amplitude) {
+        amplitude_increment = -Math.abs(amplitude_increment);
+    } else if (amplitude <= -max_amplitude) {
+        amplitude_increment = Math.abs(amplitude_increment);
+    }
+    amplitude += amplitude_increment*speed_mult;
+    E = Math.pow(amplitude, 2); // energy of wave
+
+    zero_line.update();
+}
+</script>
+</body>
+</html>
