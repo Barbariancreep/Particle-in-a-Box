@@ -10,13 +10,29 @@ canvas {
 </head>
 <body onload="start_sim()">
 
-<h1 style="text-align:center" id="k">k = </h1>
-<h1 style="text-align:center" id="wall_width">Wall Width: </h1>
-
 <div style="text-align:center">
+    <h2>
+        Barrier Thickness (d): <span id="barrier_thickness"></span>fm
+        &nbsp;&nbsp;
+        Barrier Height (U0): <span id="barrier_height"></span>MeV
+    </h2>
+    <h2>
+        Resultant Wave Amplitude: <span id="resultant_amp"></span>MeV
+        <br><br>
+        Ratio of the Resultant and Initial Amplitudes: <span id="amplitude_ratio"></span>
+    </h2>
     <hr><br>
-    <input type="range" id="wavelength_slider" min="50" max="1000">
-    <h2>Wavelength: <span id="demo"></span>px</h2>
+
+    <input type="range" id="energy_slider" min="-1000" max="1000"> <!-- min and max values are later divided by 100 -->
+    <h2>Energy of Particle: |<span id="energy_text"></span>MeV|</h2>
+    <hr><br>
+
+    <input type="range" id="k_slider" min="1" max="100"> <!-- min and max values are later divided by 1000 -->
+    <h2>k = <span id="k_text"></span></h2>
+    <hr><br>
+
+    <input type="range" id="wavelength_slider" min="2" max="40"> <!-- the min-max range is in fermis -->
+    <h2>Wavelength: <span id="wavelength_text"></span>fm</h2>
 </div>
 
 <hr>
@@ -29,34 +45,27 @@ var sim_width = window.innerWidth-16; //width of the canvas
 var sim_height = 200; //height of the canvas excluding an additional height of a square and the sliders
 var square_size = 6; // dimensions of square AKA wave thickness
 var slider_width = 12;
-var slider_height = 40;
 var number_of_squares = 3000;
-var wavelength; //wavelength of the initial/resultant wave
-var max_amplitude = 100;
+var wavelength; //wavelength of the initial/resultant wave in fermis
+var max_amplitude = 10; //Maximum energy of particle in MeV (have to change slider value also)
 var amplitude_increment = 0.01;
 var speed_mult = 20;
+var pixels_per_fermi = 10; // our unit in the x-axis will be fermis (fm = 10^-15m)
 
-var k_max = 0.05;
-var k_min = 0;
-var k_increment = 0.0005;
-
-var k_states = (k_max-k_min)/k_increment
-var k_precision = Math.floor(Math.log10(k_increment)); //to what order of magnitude should k be precise to
+var energy_OoM = -2; // Order of magnitude of the minimum value of energy
+var k_OoM = -3; // Order of magnitude of the minimum value of k (if the min was 0.01 then the OoM would be -2, as it's 1.0 * 10^-2)
 
 // variables
 var i;
 var mouse_down_bool = false;
-var amplitude = -max_amplitude;
 var resultant_amplitude; // the amplitude of the resultant wave
 var sim_background;
 var squares = [];
 var slider1;
 var slider2;
-var k_slider;
-var k_slider_background;
 var zero_line;
 var init_wave_squares; // number of squares in the initial wave
-var wall_size_squares; // number of squares in the decay function
+var barrier_size_squares; // number of squares in the decay function
 var result_wave_squares; // number of squares in the resultant wave
 var square_pixel_ratio = number_of_squares/sim_width; //ratio of how many squares there are compared to the width of the simulation
 var max_amplitude_pixels = sim_height/2; //the maximum amplitude of the initial wave in pixels
@@ -65,27 +74,50 @@ sim_height = sim_height + square_size;
 
 // equation-related variables/constants
 var e = 2.71828; //natural number
-var k = "?"; //decay constant
+var mass = 9.10938 * Math.pow(10, -34); //mass of electron in kg
+var U0 = 20.7; //height of barrier in MeV
+var k = "? "; //decay constant
+var particle_energy = "? ";
+
+// update the static html elements 
+document.getElementById("barrier_height").innerHTML = U0;
+
+
+// energy slider
+var energy_slider = document.getElementById("energy_slider");
+var energy_output = document.getElementById("energy_text"); 
+energy_output.innerHTML = "? "; 
+energy_slider.oninput = function() {
+    particle_energy = -this.value * Math.pow(10, energy_OoM);
+    energy_output.innerHTML = -particle_energy;
+}
+
+// k slider
+var k_slider = document.getElementById("k_slider");
+var k_output = document.getElementById("k_text"); 
+k_output.innerHTML = "? "; 
+k_slider.oninput = function() {
+    k = this.value * Math.pow(10, k_OoM);
+    k_output.innerHTML = k;
+}
 
 // wavelength slider
 var wavelength_slider = document.getElementById("wavelength_slider");
-var output = document.getElementById("demo"); 
-output.innerHTML = wavelength_slider.value; 
+var wavelength_output = document.getElementById("wavelength_text"); 
+wavelength_output.innerHTML = "?"; 
 wavelength_slider.oninput = function() {
-    output.innerHTML = this.value;
     wavelength = this.value;
+    wavelength_output.innerHTML = wavelength;
 }
 
 function start_sim() {
     canvas_space.start();
     // static, background colours
     sim_background = new component(sim_width, sim_height, "#ffef5e", 0, 0);
-    k_slider_background = new component(sim_width, slider_height, "#e5e4e0", 0, sim_height + slider_height);
 
     // sliders
     slider1 = new component(slider_width, sim_height, "orange", sim_width/3 - slider_width/2, 0);
     slider2 = new component(slider_width, sim_height, "orange", sim_width*2/3 - slider_width/2, 0);
-    k_slider = new component(slider_width, slider_height, "#484f57", sim_width/2 - slider_width/2, sim_height + slider_height);
 
     // generating the sqaures
     for (i = 0; i < number_of_squares; i++) {
@@ -100,7 +132,7 @@ var canvas_space = {
     canvas: document.createElement("canvas"),
     start: function() {
         this.canvas.width = sim_width;
-        this.canvas.height = sim_height + 2*slider_height; // the +40 is just to space the k_slider and the simulation
+        this.canvas.height = sim_height;
         this.context = this.canvas.getContext("2d");
         document.body.insertBefore(this.canvas, document.body.childNodes[0]);
         this.interval = setInterval(update_canvas_space, 1);
@@ -127,17 +159,12 @@ function component(width, height, colour, x, y) {
 // functions for mouse being pressed
 function mouse_down(event) {
     mouse_down_bool = true;
-    if (event.clientY <= sim_height) {
-        if (Math.abs(event.clientX - slider_width - slider1.x) < Math.abs(event.clientX - slider_width - slider2.x)) {
-            slider1.x = event.clientX - slider_width;
+    if (mouse_down_bool) {
+        if (Math.abs(event.clientX - slider1.x) < Math.abs(event.clientX - slider2.x)) {
+            slider1.x = event.clientX;
         } else {
-            slider2.x = event.clientX - slider_width;
+            slider2.x = event.clientX;
         }
-    } else if (event.clientY >= sim_height + slider_height && event.clientY <= sim_height + 2*slider_height) {
-        k_slider.x = Math.round((event.clientX - slider_width) / (sim_width/k_states)) * (sim_width/k_states); // making k_slider increment in chunks of (sim_width/k_states) pixels
-        k = k_slider.x / (sim_width/k_states) * k_increment - k_min; // k = how many increments beyond the minimum
-    } else {
-        mouse_down_bool = false;
     }
 }
 function mouse_up(event) {
@@ -145,17 +172,10 @@ function mouse_up(event) {
 }
 function mouse_move(event) { // we're saying the proper position of the mouse is (event.clientX - slider_width), since it looks more centered with the slider
     if (mouse_down_bool) {
-        if (event.clientY <= sim_height) {
-            if (Math.abs(event.clientX - slider_width - slider1.x) < Math.abs(event.clientX - slider_width - slider2.x)) {
-                slider1.x = event.clientX - slider_width;
-            } else {
-                slider2.x = event.clientX - slider_width;
-            }
-        } else if (event.clientY >= sim_height + slider_height && event.clientY <= sim_height + 2*slider_height) {
-            k_slider.x = Math.round((event.clientX - slider_width) / (sim_width/k_states)) * (sim_width/k_states); // making k_slider increment in chunks of (sim_width/k_states) pixels
-            k = k_slider.x / (sim_width/k_states) * k_increment - k_min; // k = how many increments beyond the minimum
+        if (Math.abs(event.clientX - slider1.x) < Math.abs(event.clientX - slider2.x)) {
+            slider1.x = event.clientX;
         } else {
-            mouse_down_bool = false;
+            slider2.x = event.clientX;
         }
     }
 }
@@ -168,44 +188,36 @@ canvas_space.canvas.addEventListener("mousemove", mouse_move);
 function update_canvas_space() {
     canvas_space.clear();
     sim_background.update();
-    k_slider_background.update();
 
     slider1.update();
     slider2.update();
-    k_slider.update();
 
-    document.getElementById("k").innerHTML = "k = " + String(k).substring(0, Math.abs(k_precision)+2); // to many "k"s hahahah
-    document.getElementById("wall_width").innerHTML = "Wall width: " + String(Math.round(slider2.x-slider1.x)) + "px"; 
+    document.getElementById("barrier_thickness").innerHTML = (slider2.x-slider1.x)/pixels_per_fermi;
 
     init_wave_squares = Math.round(slider1.x * square_pixel_ratio);
-    wall_size_squares = Math.round(slider2.x * square_pixel_ratio) - init_wave_squares;
-    result_wave_squares = number_of_squares - init_wave_squares - wall_size_squares;
+    barrier_size_squares = Math.round(slider2.x * square_pixel_ratio) - init_wave_squares;
+    result_wave_squares = number_of_squares - init_wave_squares - barrier_size_squares;
 
     // all the waves/functions have their X divided by square_pixel_ratio to maintain the correct size even if the number of squares does not match the width of the simulation
     // draw intial wave
     for (i = 0; i < init_wave_squares; i++) {
-        squares[i].y = amplitude*Math.cos((i-init_wave_squares)/square_pixel_ratio / wavelength * 2*Math.PI)*function_visual_modifier + max_amplitude_pixels;
+        squares[i].y = particle_energy*Math.cos((i-init_wave_squares)/square_pixel_ratio / (wavelength*pixels_per_fermi) * 2*Math.PI)*function_visual_modifier + max_amplitude_pixels;
         squares[i].update();
     }
     // draw decay function
-    for (i = 0; i < wall_size_squares; i++) {
-        squares[i + init_wave_squares].y = amplitude*Math.pow(e, -k*i/square_pixel_ratio/function_visual_modifier)*function_visual_modifier + max_amplitude_pixels;
+    for (i = 0; i < barrier_size_squares; i++) {
+        squares[i + init_wave_squares].y = particle_energy*Math.pow(e, -k*i/square_pixel_ratio/function_visual_modifier)*function_visual_modifier + max_amplitude_pixels;
         squares[i + init_wave_squares].update();
     }
-    resultant_amplitude = amplitude*Math.pow(e, -k*wall_size_squares/square_pixel_ratio/function_visual_modifier);
+    resultant_amplitude = particle_energy*Math.pow(e, -k*barrier_size_squares/square_pixel_ratio/function_visual_modifier);
+    document.getElementById("resultant_amp").innerHTML = -resultant_amplitude;
+    document.getElementById("amplitude_ratio").innerHTML = resultant_amplitude/particle_energy;
 
     // draw resultant wave
     for (i = 0; i < result_wave_squares; i++) {
-        squares[i + init_wave_squares+wall_size_squares].y = resultant_amplitude*Math.cos(i/square_pixel_ratio / wavelength * 2*Math.PI)*function_visual_modifier + max_amplitude_pixels;
-        squares[i + init_wave_squares+wall_size_squares].update();
+        squares[i + init_wave_squares+barrier_size_squares].y = resultant_amplitude*Math.cos(i/square_pixel_ratio / (wavelength*pixels_per_fermi) * 2*Math.PI)*function_visual_modifier + max_amplitude_pixels;
+        squares[i + init_wave_squares+barrier_size_squares].update();
     }
-    if (amplitude >= max_amplitude) {
-        amplitude_increment = -Math.abs(amplitude_increment);
-    } else if (amplitude <= -max_amplitude) {
-        amplitude_increment = Math.abs(amplitude_increment);
-    }
-    amplitude += amplitude_increment*speed_mult;
-    E = Math.pow(amplitude, 2); // energy of wave
 
     zero_line.update();
 }
